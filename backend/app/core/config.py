@@ -13,6 +13,8 @@ class Settings(BaseSettings):
 
     GITHUB_TOKEN: Optional[str] = None
     CACHE_TTL_SECONDS: int = 900  # 15 minutes
+    # When set, changing a profile's featured repositories requires the X-Admin-Token header.
+    ADMIN_TOKEN: Optional[str] = None
     
     DATABASE_URL: str = "sqlite+aiosqlite:///./devpulse.db"
 

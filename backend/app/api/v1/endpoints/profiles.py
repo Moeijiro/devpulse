@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+import secrets
+
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
+
+from app.core.config import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
+from app.api.v1.username import Username
 from app.db.session import get_db
 from app.services.sync import get_or_sync_user_data, get_featured_repo_names, set_featured_repo_names
 from app.services.analytics import aggregate_language_stats, calculate_overview_metrics
@@ -8,7 +13,7 @@ from app.services.analytics import aggregate_language_stats, calculate_overview_
 router = APIRouter()
 
 @router.get("/{username}")
-async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
+async def get_public_profile(username: Username, db: AsyncSession = Depends(get_db)):
     user, repos, events = await get_or_sync_user_data(username, db)
     featured_names = await get_featured_repo_names(username, db)
     
@@ -21,7 +26,8 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
                 featured_repos.append(name_map[fn.lower()])
     else:
         candidates = [r for r in repos if not r.is_fork]
-        candidates.sort(key=lambda r: r.stars_count, reverse=True)
+        # Most stars first; among equals, the most recently pushed (not whatever order GitHub returned).
+        candidates.sort(key=lambda r: (r.stars_count, (r.pushed_at or r.updated_at).timestamp() if (r.pushed_at or r.updated_at) else 0), reverse=True)
         featured_repos = candidates[:4]
 
     languages = aggregate_language_stats(repos)
@@ -37,18 +43,31 @@ async def get_public_profile(username: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{username}/featured")
 async def update_featured_repositories(
-    username: str,
-    repo_names: List[str] = Body(..., description="List of 3 to 6 repository names to feature"),
+    username: Username,
+    repo_names: List[str] = Body(..., description="1 to 6 repository names to feature"),
+    x_admin_token: str | None = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-    if len(repo_names) < 1 or len(repo_names) > 6:
-        raise HTTPException(status_code=400, detail="You must provide between 1 and 6 repository names.")
-    
-    await set_featured_repo_names(username, repo_names, db)
-    return {"message": "Featured repositories updated successfully.", "featured": repo_names}
+    # With ADMIN_TOKEN set, only the owner of this deployment can change what a profile features.
+    if settings.ADMIN_TOKEN and not secrets.compare_digest(x_admin_token or "", settings.ADMIN_TOKEN):
+        raise HTTPException(status_code=403, detail="Changing featured repositories needs the admin token.")
+    _, repos, _ = await get_or_sync_user_data(username, db)
+    owned = {r.name.lower(): r.name for r in repos}
+    chosen: List[str] = []
+    for name in repo_names:
+        real = owned.get(name.strip().lower())
+        if real is None:
+            raise HTTPException(status_code=400, detail=f"'{name}' isn't one of {username}'s public repositories.")
+        if real not in chosen:
+            chosen.append(real)
+    if not 1 <= len(chosen) <= 6:
+        raise HTTPException(status_code=400, detail="Feature between 1 and 6 repositories.")
+    await set_featured_repo_names(username, chosen, db)
+    return {"message": "Featured repositories updated successfully.", "featured": chosen}
+
 
 @router.post("/{username}/refresh")
-async def refresh_user_telemetry(username: str, db: AsyncSession = Depends(get_db)):
+async def refresh_user_telemetry(username: Username, db: AsyncSession = Depends(get_db)):
     user, repos, events = await get_or_sync_user_data(username, db, force_refresh=True)
     return {
         "message": f"Successfully refreshed telemetry for '{username}'",
