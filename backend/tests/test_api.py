@@ -89,3 +89,49 @@ async def test_featured_repositories_management(client, mock_github):
     prof = prof_res.json()
     assert len(prof["featured_repositories"]) == 2
     assert prof["featured_repositories"][0]["name"] in ["Hello-World", "Spoon-Knife"]
+
+
+@pytest.mark.asyncio
+async def test_lookups_are_case_insensitive(client, mock_github):
+    assert (await client.get("/api/v1/analytics/octocat/overview")).status_code == 200
+    # Used to re-insert the same repo ids under a second cache key and fail with a 500.
+    assert (await client.post("/api/v1/profiles/OctoCat/refresh")).status_code == 200
+    assert (await client.get("/api/v1/repos/OCTOCAT")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_invalid_usernames_never_reach_github(client, mock_github):
+    for bad in ("-octocat", "octo_cat", "a" * 40, "octo..cat"):
+        assert (await client.get(f"/api/v1/analytics/{bad}/overview")).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_featured_repositories_must_exist_and_are_deduplicated(client, mock_github):
+    bad = await client.post("/api/v1/profiles/octocat/featured", json=["Hello-World", "not-a-repo"])
+    assert bad.status_code == 400
+    ok = await client.post("/api/v1/profiles/octocat/featured", json=["hello-world", "Hello-World", "spoon-knife"])
+    assert ok.status_code == 200 and ok.json()["featured"] == ["Hello-World", "Spoon-Knife"]
+
+
+@pytest.mark.asyncio
+async def test_featured_changes_need_the_admin_token_when_one_is_set(client, mock_github, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "ADMIN_TOKEN", "s3cret")
+    assert (await client.post("/api/v1/profiles/octocat/featured", json=["Hello-World"])).status_code == 403
+    ok = await client.post("/api/v1/profiles/octocat/featured", json=["Hello-World"], headers={"X-Admin-Token": "s3cret"})
+    assert ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_github_outages_are_reported_not_crashed(client):
+    import httpx
+    from app.github import client as gh
+
+    def refuse(request):
+        raise httpx.ConnectError("boom", request=request)
+
+    real = httpx.AsyncClient
+    offline = lambda **kw: real(transport=httpx.MockTransport(refuse), **kw)  # noqa: E731
+    with patch.object(gh.httpx, "AsyncClient", side_effect=offline):
+        res = await client.get("/api/v1/analytics/somebody/overview")
+    assert res.status_code == 502 and "couldn't be reached" in res.json()["detail"]

@@ -81,3 +81,13 @@ def test_overview_metrics():
     assert metrics["total_forks"] == 10
     assert metrics["total_open_issues"] == 3
     assert metrics["recent_push_events"] == 1
+
+
+def test_push_summaries_do_not_claim_zero_commits():
+    from app.github.client import GitHubClient
+
+    c = GitHubClient()
+    assert c._summarize_event("PushEvent", {"ref": "refs/heads/main", "size": 3}, "o/r") == "Pushed 3 commits to main"
+    assert c._summarize_event("PushEvent", {"ref": "refs/heads/dev"}, "o/r") == "Pushed to dev"
+    with_list = c._summarize_event("PushEvent", {"ref": "refs/heads/main", "commits": [{"message": "fix: bug\nbody"}]}, "o/r")
+    assert with_list == 'Pushed 1 commit to main: "fix: bug"'
