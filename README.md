@@ -3,10 +3,18 @@
 [![CI](https://github.com/Moeijiro/devpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/Moeijiro/devpulse/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2014-black.svg?logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black.svg?logo=next.js)](https://nextjs.org/)
 [![GitHub API](https://img.shields.io/badge/Integration-GitHub%20REST%20v3-181717.svg?logo=github)](https://docs.github.com/en/rest)
 
 > **DevPulse** is a developer analytics platform that transforms public GitHub activity, repository metrics, language distributions, and commit feeds into responsive visual dashboards and shareable public developer portfolios.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+| Shareable public profile | Repository detail |
+| --- | --- |
+| ![Profile](docs/screenshots/profile.png) | ![Repository](docs/screenshots/repo.png) |
+| **Landing page** | **On a phone** |
+| ![Landing](docs/screenshots/landing.png) | <img src="docs/screenshots/mobile-dashboard.png" width="260" alt="Dashboard on a phone" /> |
 
 ---
 
@@ -78,10 +86,10 @@
 
 ## Tech Stack
 
-- **Backend**: Python 3.11+, FastAPI, HTTPX, SQLAlchemy 2.0, Pydantic v2, pytest
-- **Frontend**: Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS, Lucide Icons
+- **Backend**: Python 3.12+, FastAPI, HTTPX, SQLAlchemy 2.0, Pydantic v2, pytest
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist
 - **Database**: SQLite (Development) / PostgreSQL (Production)
-- **CI/CD**: GitHub Actions, Ruff, Pytest-cov
+- **CI**: GitHub Actions — backend tests, then frontend lint and production build
 
 ---
 
