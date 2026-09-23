@@ -1,143 +1,91 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Activity, Github, Search, ArrowRight, BarChart3, Code2, ShieldCheck, Sparkles, FolderGit2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Activity, ArrowRight, BarChart3, Clock, Code2, Gauge, Search, Share2, ShieldCheck, Star } from "lucide-react";
+import { Logo } from "@/components/brand";
+import { ActivityBars, GitHubMark, Languages } from "@/components/pulse";
+import { CtaBand, FeatureCard, Hero, HeroCard, InfoCard, Section, SiteFooter, SiteNav } from "@/components/kit/site";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { DEFAULT_USER } from "@/lib/api";
 
-export default function LandingPage() {
+const SAMPLE_DAYS = Array.from({ length: 30 }, (_, i) => ({ date: new Date(Date.UTC(2026, 7, 25 + i)).toISOString().slice(0, 10), count: [0, 2, 5, 3, 0, 1, 8, 4, 2, 0, 0, 6, 9, 3, 1, 2, 7, 5, 0, 3, 4, 11, 6, 2, 0, 1, 5, 8, 4, 6][i], events: [] }));
+const SAMPLE_LANGS = [
+  { language: "TypeScript", repo_count: 7, percentage: 43.8, color: "#3178C6" },
+  { language: "Python", repo_count: 6, percentage: 37.5, color: "#3572A5" },
+  { language: "Rust", repo_count: 2, percentage: 12.5, color: "#DEA584" },
+  { language: "Shell", repo_count: 1, percentage: 6.2, color: "#89E051" },
+];
+
+function Lookup() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
-
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!username.trim()) return;
-    router.push(`/dashboard?user=${encodeURIComponent(username.trim())}`);
-  }
-
+  const [name, setName] = useState("");
   return (
-    <div className="space-y-24 py-6">
-      {/* Hero Section */}
-      <section className="text-center space-y-6 max-w-3xl mx-auto pt-8">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-xs font-mono">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Factual GitHub Telemetry • Zero Arbitrary Rankings</span>
-        </div>
+    <form className="flex w-full max-w-md gap-2" onSubmit={(e) => { e.preventDefault(); router.push(`/dashboard?user=${encodeURIComponent(name.trim() || DEFAULT_USER)}`); }}>
+      <label className="relative flex-1">
+        <span className="sr-only">GitHub username</span>
+        <GitHubMark className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={DEFAULT_USER} className="h-11 bg-card pl-9" />
+      </label>
+      <Button type="submit" size="lg" className="h-11 px-5"><Search />Analyse</Button>
+    </form>
+  );
+}
 
-        <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-tight">
-          Developer telemetry, <br />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">
-            purely factual.
-          </span>
-        </h1>
+export default function Landing() {
+  return (
+    <>
+      <SiteNav brand={<Logo />} links={[["#how", "How it works"], ["#features", "Features"], ["#use-cases", "Use cases"]]}
+        actions={<Button asChild size="sm"><Link href="/dashboard">Open the dashboard</Link></Button>} />
+      <main id="main">
+        <Hero eyebrow="GitHub analytics"
+          title="See what a developer actually ships."
+          description="DevPulse turns a public GitHub profile into an activity chart, a language breakdown and a searchable repository list — plus a clean profile page to share with clients and employers."
+          actions={<Lookup />}
+          note="Any public username works. Data is cached for 15 minutes to respect GitHub's rate limit."
+          visual={
+            <HeroCard>
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+                <div><p className="mb-6 text-sm font-semibold">Public activity · 30 days</p><ActivityBars days={SAMPLE_DAYS} /></div>
+                <div><p className="mb-4 text-sm font-semibold">Languages</p><Languages stats={SAMPLE_LANGS} /></div>
+              </div>
+            </HeroCard>
+          } />
 
-        <p className="text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          Transform your GitHub repository landscape, activity feeds, and language distributions into a clean developer portfolio and analytics dashboard.
-        </p>
-
-        {/* Live GitHub Username Demo Search */}
-        <form onSubmit={handleSearch} className="max-w-md mx-auto pt-4 flex gap-2">
-          <div className="relative flex-1">
-            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
-              <Github className="w-4 h-4" />
-            </div>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. Moeijiro, octocat, torvalds"
-              className="w-full pl-10 pr-3 py-3 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            />
+        <Section id="how" eyebrow="How it works" title="One username, three views">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <FeatureCard icon={Search} title="Enter a username" index={1}>Any public GitHub account — no sign-in, no OAuth.</FeatureCard>
+            <FeatureCard icon={Activity} title="Read the activity" index={2} delay={0.05}>Pushes, pull requests and issues bucketed per day, for 7, 30 or 90 days.</FeatureCard>
+            <FeatureCard icon={Star} title="Pick the highlights" index={3} delay={0.1}>Star up to six repositories to feature on the public page.</FeatureCard>
+            <FeatureCard icon={Share2} title="Share the profile" index={4} delay={0.15}>A clean page at /u/username with featured work and languages.</FeatureCard>
           </div>
-          <button
-            type="submit"
-            className="px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition flex items-center gap-1.5 glow-blue shrink-0"
-          >
-            Explore
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </form>
+        </Section>
 
-        <div className="flex items-center justify-center gap-4 text-xs text-zinc-500 font-mono">
-          <span>Popular demos:</span>
-          <button
-            type="button"
-            onClick={() => router.push("/dashboard?user=Moeijiro")}
-            className="hover:text-blue-400 underline transition"
-          >
-            Moeijiro
-          </button>
-          <span>•</span>
-          <button
-            type="button"
-            onClick={() => router.push("/dashboard?user=octocat")}
-            className="hover:text-blue-400 underline transition"
-          >
-            octocat
-          </button>
-          <span>•</span>
-          <button
-            type="button"
-            onClick={() => router.push("/dashboard?user=torvalds")}
-            className="hover:text-blue-400 underline transition"
-          >
-            torvalds
-          </button>
-        </div>
-      </section>
-
-      {/* Feature Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 space-y-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-            <Activity className="w-5 h-5" />
+        <Section id="features" eyebrow="Under the hood" title="Fast, polite to GitHub, hard to break" tinted>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <FeatureCard icon={Clock} title="15-minute cache">Profiles, repositories and events are cached, so a busy page stays inside 60 requests an hour.</FeatureCard>
+            <FeatureCard icon={Gauge} title="Rate-limit aware" delay={0.05}>A clear message when GitHub&apos;s limit is hit; a token raises it to 5,000.</FeatureCard>
+            <FeatureCard icon={Code2} title="Honest language stats" delay={0.1}>Forks are left out, so the breakdown reflects the developer&apos;s own work.</FeatureCard>
+            <FeatureCard icon={ShieldCheck} title="Validated usernames">Only valid GitHub logins reach the GitHub API; lookups are case-insensitive.</FeatureCard>
+            <FeatureCard icon={BarChart3} title="Search and sort" delay={0.05}>Filter repositories by language, search descriptions, sort by stars or recency.</FeatureCard>
+            <FeatureCard icon={Share2} title="Owner-only edits" delay={0.1}>With an admin token set, only you can change what your profile features.</FeatureCard>
           </div>
-          <h3 className="font-semibold text-white">7/30/90-Day Telemetry</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Directly aggregate public event streams without inventing scores. Inspect push velocity, issue resolutions, and PR activity.
-          </p>
-        </div>
+        </Section>
 
-        <div className="p-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 space-y-3">
-          <div className="w-10 h-10 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-            <Code2 className="w-5 h-5" />
+        <Section id="use-cases" eyebrow="Use cases" title="For people who hire, and people who get hired" last>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <InfoCard title="Freelancers">Send one link that shows real, recent work instead of a static CV.</InfoCard>
+            <InfoCard title="Tech recruiters" delay={0.05}>Check what a candidate has been building lately, in seconds.</InfoCard>
+            <InfoCard title="Team leads">A quick read on a new contributor&apos;s languages and activity.</InfoCard>
+            <InfoCard title="Open-source maintainers" delay={0.05}>See stars, forks and issues across your projects in one list.</InfoCard>
           </div>
-          <h3 className="font-semibold text-white">Language Intelligence</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Calculate accurate repository-weighted language distributions, identifying primary tech stacks across entire GitHub ecosystems.
-          </p>
-        </div>
-
-        <div className="p-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 space-y-3">
-          <div className="w-10 h-10 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-            <FolderGit2 className="w-5 h-5" />
-          </div>
-          <h3 className="font-semibold text-white">Public Portfolio Route</h3>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            Create clean, shareable developer portfolios at <code className="text-purple-400">/u/&#123;username&#125;</code> highlighting your top 3–6 pinned repositories.
-          </p>
-        </div>
-      </section>
-
-      {/* Defensive Philosophy Callout */}
-      <section className="p-8 rounded-2xl border border-zinc-800 bg-zinc-900/20 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="space-y-2 max-w-xl">
-          <div className="inline-flex items-center gap-1.5 text-xs text-blue-400 font-mono">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Ethical Metrics Policy</span>
-          </div>
-          <h2 className="text-xl font-bold text-white">No Speculative Performance Ratings</h2>
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            DevPulse avoids deceptive AI productivity scores and commit-based developer rankings. We present factual repository telemetry and event history to let engineering accomplishments speak for themselves.
-          </p>
-        </div>
-        <Link
-          href="/u/Moeijiro"
-          className="px-6 py-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-semibold text-zinc-200 transition shrink-0"
-        >
-          View Live Portfolio Demo
-        </Link>
-      </section>
-    </div>
+          <CtaBand title="Try it on your own GitHub" description="Enter a username — the dashboard and the public profile are ready immediately."
+            action={<Button asChild size="lg" variant="secondary" className="h-11 px-5"><Link href="/dashboard">Open the dashboard<ArrowRight data-icon="inline-end" /></Link></Button>} />
+        </Section>
+      </main>
+      <SiteFooter brand={<Logo />} note="A portfolio project · MIT licensed · uses public GitHub data" right={<><Clock className="size-3.5" />Cached for 15 minutes</>} />
+    </>
   );
 }

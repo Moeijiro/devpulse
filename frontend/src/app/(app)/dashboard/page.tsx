@@ -1,287 +1,160 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { 
-  Activity, Star, GitFork, AlertCircle, RefreshCw, Search, 
-  Filter, Calendar, ExternalLink, Github, Code2, Sparkles, FolderGit2
-} from "lucide-react";
-import { 
-  api, OverviewMetrics, ActivityDay, LanguageStat, GitHubRepo 
-} from "@/lib/api";
-import ActivityChart from "@/components/ActivityChart";
-import LanguageBreakdown from "@/components/LanguageBreakdown";
-import RepoCard from "@/components/RepoCard";
+import { Suspense, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { Activity, ExternalLink, GitFork, RefreshCw, Search, Star, UserRound } from "lucide-react";
+import { ActivityBars, GitHubMark, Languages, LanguageDot, UserHeader } from "@/components/pulse";
+import { SelectField } from "@/components/kit/select-field";
+import { Empty, ErrorState, PageLoading, Panel, RowsLoading, Stat } from "@/components/kit/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useApi } from "@/hooks/use-api";
+import { useDebounced } from "@/hooks/use-debounced";
+import { api, DEFAULT_USER, type RepoSort } from "@/lib/api";
+import { nf, relative } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
-  const searchParams = useSearchParams();
+  // useSearchParams needs a Suspense boundary for the static build.
+  return <Suspense fallback={<PageLoading />}><Dashboard /></Suspense>;
+}
+
+function UserSearch({ initial }: { initial: string }) {
   const router = useRouter();
-  const initialUser = searchParams.get("user") || "Moeijiro";
+  const [value, setValue] = useState(initial);
+  return (
+    <form className="mb-6 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (value.trim()) router.push(`/dashboard?user=${encodeURIComponent(value.trim())}`); }}>
+      <label className="relative flex-1 sm:max-w-sm">
+        <span className="sr-only">GitHub username</span>
+        <GitHubMark className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="GitHub username" className="bg-card pl-8" />
+      </label>
+      <Button type="submit"><Search />Analyse</Button>
+    </form>
+  );
+}
 
-  const [username, setUsername] = useState(initialUser);
-  const [inputUser, setInputUser] = useState(initialUser);
-  const [days, setDays] = useState<number>(30);
-  
-  const [overview, setOverview] = useState<OverviewMetrics | null>(null);
-  const [activity, setActivity] = useState<ActivityDay[]>([]);
-  const [languages, setLanguages] = useState<LanguageStat[]>([]);
-  const [repos, setRepos] = useState<GitHubRepo[]>([]);
-  
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedLang, setSelectedLang] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<string>("updated");
-  
-  const [loading, setLoading] = useState(true);
+function Dashboard() {
+  const user = useSearchParams().get("user") || DEFAULT_USER;
+  const [days, setDays] = useState(30);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const main = useApi(() => Promise.all([api.getOverview(user), api.getLanguages(user), api.getProfile(user)]), user);
+  const activity = useApi(() => api.getActivity(user, days), `${user}:${days}`);
 
-  useEffect(() => {
-    loadData(username, days);
-  }, [username, days]);
-
-  async function loadData(user: string, daysWindow: number) {
-    setLoading(true);
-    setError(null);
-    try {
-      const [ov, act, langs, rep] = await Promise.all([
-        api.getOverview(user),
-        api.getActivity(user, daysWindow),
-        api.getLanguages(user),
-        api.getRepos(user),
-      ]);
-      setOverview(ov);
-      setActivity(act);
-      setLanguages(langs);
-      setRepos(rep);
-    } catch (err: any) {
-      setError(err.message || "Failed to load developer telemetry.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleRefresh() {
+  async function refresh() {
     setRefreshing(true);
     try {
-      await api.refresh(username);
-      await loadData(username, days);
-    } catch (err: any) {
-      setError("Failed to refresh GitHub data.");
+      const r = await api.refresh(user);
+      toast.success(`Synced ${r.repos_count} repositories and ${r.events_count} events from GitHub`);
+      main.reload();
+      activity.reload();
+    } catch (err) {
+      toast.error((err as Error).message);
     } finally {
       setRefreshing(false);
     }
   }
 
-  function handleUserSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!inputUser.trim()) return;
-    setUsername(inputUser.trim());
-    router.push(`/dashboard?user=${encodeURIComponent(inputUser.trim())}`);
+  return (
+    <>
+      <UserSearch key={user} initial={user} />
+      {main.error ? <ErrorState message={main.error} onRetry={main.reload} /> : !main.data ? <PageLoading /> : (() => {
+        const [o, languages, profile] = main.data;
+        const featured = profile.featured_repositories.map((r) => r.name);
+        return (
+          <>
+            <UserHeader user={o.user} actions={<>
+              <Button variant="outline" onClick={refresh} disabled={refreshing}><RefreshCw className={cn(refreshing && "animate-spin")} />{refreshing ? "Syncing…" : "Refresh"}</Button>
+              <Button asChild><Link href={`/u/${o.user.username}`}><UserRound />Public profile</Link></Button>
+            </>} />
+            <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Stat label="Repositories" icon={GitHubMark} value={nf.format(o.total_repositories)} hint={`${nf.format(o.user.public_repos)} public on GitHub`} />
+              <Stat label="Stars earned" icon={Star} value={nf.format(o.total_stars)} />
+              <Stat label="Forks" icon={GitFork} value={nf.format(o.total_forks)} />
+              <Stat label="Pushes" icon={Activity} value={nf.format(o.recent_push_events)} hint={`of ${o.total_tracked_events} recent public events`} />
+            </div>
+            <div className="mb-5 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+              <Panel title="Public activity" description="GitHub keeps the last ~90 days / 300 public events."
+                action={<div className="inline-flex rounded-lg border p-0.5">{[7, 30, 90].map((d) => (
+                  <button key={d} type="button" onClick={() => setDays(d)} className={cn("rounded-md px-2 py-0.5 text-xs", days === d ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>{d}d</button>
+                ))}</div>} bodyClassName="px-5 pt-8 pb-4">
+                {activity.data ? <ActivityBars days={activity.data} /> : activity.error ? <p className="text-sm text-destructive">{activity.error}</p> : <div className="h-40" />}
+              </Panel>
+              <Panel title="Languages" description="Share of original repositories by main language." bodyClassName="p-5"><Languages stats={languages} /></Panel>
+            </div>
+            <Repositories user={o.user.username} featured={featured} languages={languages.map((l) => l.language)} colors={Object.fromEntries(languages.map((l) => [l.language, l.color]))} onFeaturedChange={main.reload} />
+          </>
+        );
+      })()}
+    </>
+  );
+}
+
+function Repositories({ user, featured, languages, colors, onFeaturedChange }: { user: string; featured: string[]; languages: string[]; colors: Record<string, string>; onFeaturedChange: () => void }) {
+  const [search, setSearch] = useState("");
+  const [language, setLanguage] = useState("all");
+  const [sort, setSort] = useState<RepoSort>("updated");
+  const q = useDebounced(search.trim(), 250);
+  const params = { search: q || undefined, language: language === "all" ? undefined : language, sort_by: sort };
+  const repos = useApi(() => api.getRepos(user, params), `${user}:${JSON.stringify(params)}`);
+
+  async function toggle(name: string) {
+    const next = featured.includes(name) ? featured.filter((n) => n !== name) : [...featured, name];
+    if (next.length === 0) return toast.error("Keep at least one repository featured.");
+    if (next.length > 6) return toast.error("Feature up to six repositories.");
+    try {
+      await api.updateFeatured(user, next);
+      toast.success(featured.includes(name) ? `${name} removed from the profile` : `${name} featured on the profile`);
+      onFeaturedChange();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
   }
 
-  const filteredRepos = useMemo(() => {
-    let list = [...repos];
-    if (selectedLang !== "all") {
-      list = list.filter((r) => r.language?.toLowerCase() === selectedLang.toLowerCase());
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (r) => r.name.toLowerCase().includes(q) || (r.description && r.description.toLowerCase().includes(q))
-      );
-    }
-    if (sortBy === "stars") {
-      list.sort((a, b) => b.stars_count - a.stars_count);
-    } else if (sortBy === "name") {
-      list.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
-      list.sort((a, b) => (b.pushed_at || b.updated_at || "").localeCompare(a.pushed_at || a.updated_at || ""));
-    }
-    return list;
-  }, [repos, selectedLang, searchQuery, sortBy]);
-
   return (
-    <div className="space-y-8 py-4">
-      {/* Top Header & User Switcher */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800/80 pb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Activity className="w-6 h-6 text-blue-400" />
-            Developer Telemetry
-          </h1>
-          <p className="text-xs text-zinc-400">
-            Factual repository metrics and telemetry for GitHub user <strong className="text-white">@{username}</strong>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <form onSubmit={handleUserSubmit} className="flex gap-2">
-            <input
-              type="text"
-              value={inputUser}
-              onChange={(e) => setInputUser(e.target.value)}
-              placeholder="Switch username..."
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-            />
-            <button
-              type="submit"
-              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold rounded-lg text-white transition"
-            >
-              Go
-            </button>
-          </form>
-
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 bg-zinc-900 text-zinc-300 text-xs flex items-center gap-1.5 transition disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-blue-400" : ""}`} />
-            Sync
-          </button>
-        </div>
+    <Panel title="Repositories" description="Star a repository to feature it on the public profile (up to six)." bodyClassName="p-0">
+      <div className="grid grid-cols-1 gap-2 border-b p-3 sm:grid-cols-[minmax(0,1fr)_170px_150px]">
+        <label className="relative">
+          <span className="sr-only">Search repositories</span>
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or description" className="bg-card pl-8" />
+        </label>
+        <SelectField label="Language" value={language} onChange={setLanguage} options={[{ value: "all", label: "All languages" }, ...languages]} />
+        <SelectField label="Sort" value={sort} onChange={(v) => setSort(v as RepoSort)} options={[{ value: "updated", label: "Recently pushed" }, { value: "stars", label: "Most stars" }, { value: "name", label: "Name" }]} />
       </div>
-
-      {error ? (
-        <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs">
-          {error}
-        </div>
-      ) : loading ? (
-        <div className="py-24 text-center space-y-3">
-          <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-zinc-400 font-mono">Aggregating public telemetry from GitHub...</p>
-        </div>
+      {repos.error ? <div className="p-4"><ErrorState message={repos.error} onRetry={repos.reload} /></div> : !repos.data ? <RowsLoading /> : repos.data.length === 0 ? (
+        <Empty icon={Search} title="No repositories match" />
       ) : (
-        <>
-          {/* Overview Metrics Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">Repositories</span>
-              <p className="text-2xl font-bold text-white">{overview?.total_repositories}</p>
-            </div>
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">Total Stars</span>
-              <p className="text-2xl font-bold text-amber-400 flex items-center gap-1.5">
-                <Star className="w-5 h-5 fill-amber-400/20" />
-                {overview?.total_stars}
-              </p>
-            </div>
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">Forks</span>
-              <p className="text-2xl font-bold text-zinc-200 flex items-center gap-1.5">
-                <GitFork className="w-5 h-5 text-zinc-400" />
-                {overview?.total_forks}
-              </p>
-            </div>
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-wider">Open Issues</span>
-              <p className="text-2xl font-bold text-zinc-200 flex items-center gap-1.5">
-                <AlertCircle className="w-5 h-5 text-zinc-400" />
-                {overview?.total_open_issues}
-              </p>
-            </div>
-          </div>
-
-          {/* Activity Velocity Chart */}
-          <div className="p-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <h3 className="font-semibold text-sm text-white flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-blue-400" />
-                  Activity Velocity Stream
-                </h3>
-                <p className="text-xs text-zinc-400">Events aggregated directly from GitHub public event timeline.</p>
-              </div>
-
-              {/* Time window selector */}
-              <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-xs font-mono">
-                {[7, 30, 90].map((w) => (
-                  <button
-                    key={w}
-                    onClick={() => setDays(w)}
-                    className={`px-3 py-1 rounded transition ${
-                      days === w ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-white"
-                    }`}
-                  >
-                    {w}d
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <ActivityChart data={activity} daysWindow={days} />
-          </div>
-
-          {/* Languages Breakdown */}
-          <div className="p-6 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 space-y-4">
-            <div className="space-y-0.5">
-              <h3 className="font-semibold text-sm text-white flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-indigo-400" />
-                Ecosystem Language Distribution
-              </h3>
-              <p className="text-xs text-zinc-400">Repository language footprint normalized across public repositories.</p>
-            </div>
-            <LanguageBreakdown languages={languages} />
-          </div>
-
-          {/* Repositories Explorer */}
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <h3 className="font-semibold text-sm text-white flex items-center gap-2">
-                <FolderGit2 className="w-4 h-4 text-blue-400" />
-                Public Repositories ({filteredRepos.length})
-              </h3>
-
-              {/* Search & Filters */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search repositories..."
-                    className="bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                  />
+        <ul className="divide-y">
+          {repos.data.map((r) => {
+            const isFeatured = featured.includes(r.name);
+            return (
+              <li key={r.id} className="flex items-start gap-3 px-5 py-3.5">
+                <button type="button" onClick={() => toggle(r.name)} aria-pressed={isFeatured} aria-label={isFeatured ? `Unfeature ${r.name}` : `Feature ${r.name}`}
+                  className={cn("mt-0.5 rounded-md p-1 transition-colors", isFeatured ? "text-warn" : "text-muted-foreground/50 hover:text-foreground")}>
+                  <Star className={cn("size-4", isFeatured && "fill-current")} />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link href={`/repo/${user}/${r.name}`} className="font-medium hover:text-primary">{r.name}</Link>
+                    {r.is_fork ? <span className="rounded border px-1 text-[10px] text-muted-foreground">fork</span> : null}
+                  </div>
+                  {r.description ? <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{r.description}</p> : null}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <LanguageDot language={r.language} color={r.language ? colors[r.language] : undefined} />
+                    <span className="inline-flex items-center gap-1"><Star className="size-3.5" />{nf.format(r.stars_count)}</span>
+                    <span className="inline-flex items-center gap-1"><GitFork className="size-3.5" />{nf.format(r.forks_count)}</span>
+                    <span>pushed {relative(r.pushed_at ?? r.updated_at)}</span>
+                  </div>
                 </div>
-
-                <select
-                  value={selectedLang}
-                  onChange={(e) => setSelectedLang(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="all">All Languages</option>
-                  {languages.map((l) => (
-                    <option key={l.language} value={l.language}>{l.language}</option>
-                  ))}
-                </select>
-
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="updated">Recently Updated</option>
-                  <option value="stars">Most Stars</option>
-                  <option value="name">Name (A-Z)</option>
-                </select>
-              </div>
-            </div>
-
-            {filteredRepos.length === 0 ? (
-              <div className="py-12 text-center border border-dashed border-zinc-800 rounded-xl text-xs text-zinc-500 font-mono">
-                No repositories match the current filters.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredRepos.map((repo) => (
-                  <RepoCard key={repo.id} repo={repo} />
-                ))}
-              </div>
-            )}
-          </div>
-        </>
+                <a href={r.html_url} target="_blank" rel="noreferrer" aria-label={`${r.name} on GitHub`} className="rounded-md p-1 text-muted-foreground hover:text-foreground"><ExternalLink className="size-4" /></a>
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </div>
+    </Panel>
   );
 }

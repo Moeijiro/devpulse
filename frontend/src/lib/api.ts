@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(/\/$/, "");
+/** The profile the demo opens on. */
+export const DEFAULT_USER = "Moeijiro";
 
 export interface GitHubUser {
   username: string;
@@ -33,7 +35,7 @@ export interface ActivityDay {
 export interface LanguageStat {
   language: string;
   repo_count: number;
-  percentage: float;
+  percentage: number;
   color: string;
 }
 
@@ -74,73 +76,49 @@ export interface RateLimitStatus {
   is_authenticated: boolean;
 }
 
-export const api = {
-  async getOverview(username: string): Promise<OverviewMetrics> {
-    const res = await fetch(`${API_URL}/analytics/${username}/overview`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: "User not found." }));
-      throw new Error(err.detail || "User not found.");
+export type RepoSort = "updated" | "stars" | "name";
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...init, headers: init?.body ? { "Content-Type": "application/json" } : undefined });
+  } catch {
+    throw new ApiError("Can't reach the DevPulse API. Is the backend running on port 8000?", 0);
+  }
+  if (!res.ok) {
+    let message = `Request failed (HTTP ${res.status}).`;
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") message = data.detail;
+      else if (Array.isArray(data?.detail) && data.detail[0]?.msg) message = res.status === 422 ? "That isn't a valid GitHub username." : String(data.detail[0].msg);
+    } catch {
+      /* not JSON */
     }
-    return res.json();
-  },
+    throw new ApiError(message, res.status);
+  }
+  return res.json() as Promise<T>;
+}
 
-  async getActivity(username: string, days: number = 30): Promise<ActivityDay[]> {
-    const res = await fetch(`${API_URL}/analytics/${username}/activity?days=${days}`);
-    if (!res.ok) throw new Error("Failed to load activity telemetry.");
-    return res.json();
-  },
+const u = (username: string) => encodeURIComponent(username);
 
-  async getLanguages(username: string): Promise<LanguageStat[]> {
-    const res = await fetch(`${API_URL}/analytics/${username}/languages`);
-    if (!res.ok) throw new Error("Failed to load language breakdown.");
-    return res.json();
-  },
-
-  async getRepos(
-    username: string,
-    params?: { language?: string; search?: string; sort_by?: string }
-  ): Promise<GitHubRepo[]> {
+export const api = {
+  getOverview: (username: string) => request<OverviewMetrics>(`/analytics/${u(username)}/overview`),
+  getActivity: (username: string, days = 30) => request<ActivityDay[]>(`/analytics/${u(username)}/activity?days=${days}`),
+  getLanguages: (username: string) => request<LanguageStat[]>(`/analytics/${u(username)}/languages`),
+  getRepos: (username: string, params: { language?: string; search?: string; sort_by?: RepoSort } = {}) => {
     const query = new URLSearchParams();
-    if (params?.language) query.set("language", params.language);
-    if (params?.search) query.set("search", params.search);
-    if (params?.sort_by) query.set("sort_by", params.sort_by);
-
-    const res = await fetch(`${API_URL}/repos/${username}?${query.toString()}`);
-    if (!res.ok) throw new Error("Failed to load repositories.");
-    return res.json();
+    for (const [k, v] of Object.entries(params)) if (v) query.set(k, v);
+    return request<GitHubRepo[]>(`/repos/${u(username)}?${query}`);
   },
-
-  async getRepoDetail(username: string, repoName: string): Promise<GitHubRepo> {
-    const res = await fetch(`${API_URL}/repos/${username}/${repoName}`);
-    if (!res.ok) throw new Error("Repository not found.");
-    return res.json();
-  },
-
-  async getProfile(username: string): Promise<PublicProfileData> {
-    const res = await fetch(`${API_URL}/profiles/${username}`);
-    if (!res.ok) throw new Error("Profile not found.");
-    return res.json();
-  },
-
-  async updateFeatured(username: string, repoNames: string[]): Promise<void> {
-    const res = await fetch(`${API_URL}/profiles/${username}/featured`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(repoNames),
-    });
-    if (!res.ok) throw new Error("Failed to update featured repositories.");
-  },
-
-  async refresh(username: string): Promise<void> {
-    const res = await fetch(`${API_URL}/profiles/${username}/refresh`, {
-      method: "POST",
-    });
-    if (!res.ok) throw new Error("Failed to sync GitHub data.");
-  },
-
-  async getRateLimit(): Promise<RateLimitStatus> {
-    const res = await fetch(`${API_URL}/system/rate-limit`);
-    if (!res.ok) throw new Error("Failed to fetch rate limit status.");
-    return res.json();
-  },
+  getRepoDetail: (username: string, repo: string) => request<GitHubRepo>(`/repos/${u(username)}/${encodeURIComponent(repo)}`),
+  getProfile: (username: string) => request<PublicProfileData>(`/profiles/${u(username)}`),
+  updateFeatured: (username: string, names: string[]) => request<{ featured: string[] }>(`/profiles/${u(username)}/featured`, { method: "POST", body: JSON.stringify(names) }),
+  refresh: (username: string) => request<{ repos_count: number; events_count: number }>(`/profiles/${u(username)}/refresh`, { method: "POST" }),
+  rateLimit: () => request<RateLimitStatus>(`/system/rate-limit`),
 };
