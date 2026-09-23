@@ -1,12 +1,14 @@
 # DevPulse
 
-[![CI](https://github.com/Moeijiro/devpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/Moeijiro/devpulse/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black.svg?logo=next.js)](https://nextjs.org/)
-[![GitHub API](https://img.shields.io/badge/Integration-GitHub%20REST%20v3-181717.svg?logo=github)](https://docs.github.com/en/rest)
+**See what a developer actually ships.** DevPulse turns any public GitHub profile into
+an activity chart, a language breakdown and a searchable repository list. It also gives
+each developer a clean profile page they can share with clients and employers. GitHub
+data is cached for 15 minutes, so a busy page stays inside the API's rate limit.
 
-> **DevPulse** is a developer analytics platform that transforms public GitHub activity, repository metrics, language distributions, and commit feeds into responsive visual dashboards and shareable public developer portfolios.
+It reads public data only. There is no OAuth, and it never reads private repositories.
+
+> Portfolio project. The screenshots show a real public profile (`Moeijiro`), read
+> through GitHub's public API.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -16,112 +18,184 @@
 | **Landing page** | **On a phone** |
 | ![Landing](docs/screenshots/landing.png) | <img src="docs/screenshots/mobile-dashboard.png" width="260" alt="Dashboard on a phone" /> |
 
----
+## Contents
 
-## System Architecture
+- [Features](#features)
+- [Architecture](#architecture)
+- [How data is fetched and cached](#how-data-is-fetched-and-cached)
+- [Security](#security)
+- [API overview](#api-overview)
+- [Getting started](#getting-started)
+- [Demo walkthrough](#demo-walkthrough)
+- [Testing](#testing)
+- [Environment variables](#environment-variables)
+- [Known limitations](#known-limitations)
+
+## Features
+
+- **Dashboard:**
+  - A profile header: name, bio, followers, location, company, blog, and account age.
+  - Totals: repositories, stars, forks and recent pushes.
+  - An activity chart over 7, 30 or 90 days. Hover a day to see what happened.
+- **Languages:** one stacked bar in GitHub's language colours. Forks are left out, so it
+  reflects the developer's own work.
+- **Repositories:**
+  - Search names and descriptions, filter by language, sort by recent push, stars or
+    name.
+  - **Star up to six** to feature them on the public profile.
+- **Public profile** (`/u/<username>`): featured work, languages, recent activity and a
+  copy-link button.
+- **Repository detail:** stars, forks, open issues, language and last push.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI["Next.js 16 dashboard<br/>and /u/&lt;user&gt; profile"] -- JSON --> R
+  subgraph Backend["FastAPI · async SQLAlchemy"]
+    R["app/api/routes<br/>analytics · repositories · profiles · system"]
+    S["services/sync<br/>15-minute cache"]
+    A["services/analytics<br/>languages · activity · totals"]
+    G["app/github/client<br/>httpx · error mapping"]
+  end
+  DB[("SQLite cache<br/>(PostgreSQL-ready)")]
+  GH["api.github.com"]
+  R --> S --> DB
+  S -- "stale or missing" --> G --> GH
+  R --> A
+```
 
 ```
-                               +-------------------------------------+
-                               |           DevPulse Web UI           |
-                               |  (Next.js 14, TypeScript, Tailwind) |
-                               +------------------+------------------+
-                                                  |
-                                            REST API (JSON)
-                                                  |
-                               +------------------v------------------+
-                               |          DevPulse Backend           |
-                               |    (FastAPI, Pydantic, HTTPX)       |
-                               +------------------+------------------+
-                                                  |
-              +-----------------------------------+-----------------------------------+
-              |                                   |                                   |
-+-------------v--------------+     +--------------v-------------+     +---------------v---------------+
-|    GitHub API Connector    |     |    Aggregation & Analytics |     |   Cache & Persistence Engine  |
-| • Asynchronous HTTPX Pool  |     | • 7 / 30 / 90-Day Buckets  |     | • TTL-Based Stale-While-Reval |
-| • Rate Limit Header Watch  |     | • Language Byte Normalizer |     | • SQLite / PostgreSQL Ready   |
-| • OAuth / PAT Token Inject |     | • Event Stream Sequencer   |     | • Pinned Featured Repos       |
-+-------------+--------------+     +----------------------------+     +-------------------------------+
-              |
-              v
-     [ GitHub REST v3 ]
+backend/app
+├── api/routes/     analytics, repositories, profiles, system
+├── api/deps.py     GitHub username validation
+├── github/         client (fetch + error mapping), normalised schemas
+├── models/         cache (profile, repos, events), featured repositories
+├── services/       sync (cache, case-insensitive keys), analytics (aggregation)
+├── db/             base, async session
+└── seed.py         warm the cache: python -m app.seed [--reset] [username ...]
+frontend/src
+├── app/            landing, (app)/dashboard, (app)/repo/[owner]/[name], u/[username]
+└── components/     kit/ (shared house style), activity bars, language bar, user header
 ```
 
----
+## How data is fetched and cached
 
-## Core Principles & Defensive Scope
+```mermaid
+sequenceDiagram
+  participant UI
+  participant API
+  participant Cache
+  participant GitHub
+  UI->>API: GET /analytics/{user}/overview
+  API->>Cache: profile for lower(user)?
+  alt fresh (under CACHE_TTL_SECONDS)
+    Cache-->>API: profile, repos, events
+  else stale or missing
+    API->>GitHub: user, repos (100), public events (100)
+    GitHub-->>API: JSON (or 404 / 403 / 5xx / timeout)
+    API->>Cache: replace this user's rows
+  end
+  API-->>UI: totals and user
+```
 
-1. **Factual Metrics Only**: DevPulse strictly surfaces factual public telemetry (commits, pull requests, issues, stars, forks, and language bytes). It intentionally **does not compute arbitrary developer scores** or rank programmers.
-2. **Rate Limit Preservation**: All external GitHub API calls are cached with configurable TTLs (e.g. 15 minutes for metadata, 1 hour for language breakdowns) to conserve API quotas.
-3. **Public-First & Non-Intrusive**: Operates seamlessly in anonymous public mode for any public username (`/u/{username}`), respecting private repository boundaries.
+One sync costs three GitHub requests. Without a token GitHub allows 60 an hour; with
+`GITHUB_TOKEN` it allows 5,000.
 
----
+## Security
 
-## Key Features
+| Concern | What DevPulse does |
+| --- | --- |
+| URL injection | Usernames must match GitHub's login rules before they're put into a GitHub URL (422 otherwise). |
+| Cache poisoning / crashes | Cache keys are case-insensitive. `Octocat` and `octocat` used to collide on repository IDs and fail with a 500. |
+| Upstream failures | Timeouts → 504, network errors and GitHub 5xx → 502, rate limit → 429, each with a readable message. |
+| Profile edits | Featured names must be the user's own repositories, de-duplicated. With `ADMIN_TOKEN` set, changes need the `X-Admin-Token` header. |
+| Secrets | `GITHUB_TOKEN` is only sent to api.github.com and never returned. |
 
-- 📈 **Activity Velocity Timeline**: Interactive 7-day, 30-day, and 90-day activity event visualizations parsed directly from public GitHub event streams.
-- 💻 **Language Breakdown**: Weighted language distribution calculated across all repositories with percentage representations and byte counters.
-- 🗂️ **Repository Explorer**: Real-time client-side search, filtering by programming language, and multi-field sorting (recently updated, stars, forks, open issues).
-- 🔍 **Repository Deep Dive**: Detailed inspection view showing commit history, open issue counts, primary branch metadata, and license info.
-- 👤 **Shareable Developer Profile (`/u/{username}`)**: Public portfolio page displaying curated featured repositories (3–6 pinned repositories) and overall open-source footprint.
-- ⚡ **Rate Limit Monitor**: Live visibility into remaining GitHub API quotas and reset countdowns extracted from upstream response headers.
-- 🔄 **On-Demand Cache Invalidation**: Instant refresh trigger to pull fresh commits and PR updates from GitHub.
+## API overview
 
----
+Interactive docs are at `http://localhost:8000/docs`. All paths start with `/api/v1`.
 
-## API Endpoints
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/analytics/{user}/overview` | Totals and the user profile |
+| GET | `/analytics/{user}/activity?days=7\|30\|90` | Events per day, with the day's first three events |
+| GET | `/analytics/{user}/languages` | Language shares of original repositories |
+| GET | `/repos/{user}?search=&language=&sort_by=` | Repositories |
+| GET | `/repos/{user}/{repo}` | One repository |
+| GET | `/profiles/{user}` | Public profile: featured work, languages, recent activity |
+| POST | `/profiles/{user}/featured` | Set 1–6 featured repositories |
+| POST | `/profiles/{user}/refresh` | Re-fetch from GitHub now |
+| GET | `/system/rate-limit` | Remaining GitHub requests |
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/v1/analytics/{username}/overview` | High-level summary (repos, stars, forks, total commits) |
-| `GET` | `/api/v1/analytics/{username}/activity` | 7, 30, and 90-day activity telemetry buckets |
-| `GET` | `/api/v1/analytics/{username}/languages` | Aggregate language distribution breakdown |
-| `GET` | `/api/v1/repos/{username}` | List normalized repositories with filtering |
-| `GET` | `/api/v1/repos/{username}/{repo_name}` | Repository details and recent commit feed |
-| `GET` | `/api/v1/profiles/{username}` | Public developer profile with pinned repositories |
-| `POST` | `/api/v1/profiles/{username}/featured` | Update pinned featured repositories (3-6) |
-| `POST` | `/api/v1/profiles/{username}/refresh` | Invalidate cache and sync latest GitHub telemetry |
-| `GET` | `/api/v1/system/rate-limit` | Upstream GitHub API quota status |
+## Getting started
 
----
-
-## Tech Stack
-
-- **Backend**: Python 3.12+, FastAPI, HTTPX, SQLAlchemy 2.0, Pydantic v2, pytest
-- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist
-- **Database**: SQLite (Development) / PostgreSQL (Production)
-- **CI**: GitHub Actions — backend tests, then frontend lint and production build
-
----
-
-## Quickstart
-
-### Backend Setup
+Requirements: Python 3.12+ and Node 20+. A network connection is needed to reach
+api.github.com.
 
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env
-
-# Optional: Add GITHUB_TOKEN to .env for 5,000 req/hr rate limits
-pytest
-uvicorn app.main:app --reload --port 8000
+make install        # backend venv + frontend deps
+make seed           # reset the cache and pre-fetch the demo profile
+make api            # http://localhost:8000
+make web            # http://localhost:3000
 ```
 
-### Frontend Setup
+Without make:
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env.local
-npm run dev
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+cp ../.env.example ../.env
+.venv/bin/python -m app.seed --reset
+.venv/bin/uvicorn app.main:app --port 8000
+cd ../frontend && npm install && npm run dev
 ```
 
-Open `http://localhost:3000` in your browser.
+## Demo walkthrough
 
----
+1. Enter a GitHub username on the landing page. The dashboard defaults to `Moeijiro`.
+2. Switch the activity window between 7, 30 and 90 days, and hover a bar.
+3. Filter the repositories by language, then star one to feature it.
+4. Open **Public profile** and copy the link.
+
+## Testing
+
+```bash
+make test           # 13 tests
+```
+
+GitHub is replaced by fixtures, so the suite runs offline. The tests cover:
+- language and activity aggregation, and totals
+- the overview, languages and repository endpoints, with search and filters
+- featured repositories: they must exist, and duplicates are removed
+- the admin token
+- case-insensitive lookups
+- username validation
+- GitHub outages returning 502
+- push summaries
+
+CI runs the backend tests, then lints and builds the frontend
+([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
+## Environment variables
+
+See [.env.example](.env.example).
+
+| Variable | Default | |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./devpulse.db` | Any async SQLAlchemy URL |
+| `CORS_ORIGINS` | `http://localhost:3000,…` | Browser origins allowed to call the API |
+| `GITHUB_TOKEN` | — | Optional; raises the GitHub limit to 5,000 requests an hour |
+| `CACHE_TTL_SECONDS` | `900` | How long GitHub data is reused |
+| `ADMIN_TOKEN` | — | Optional; required as `X-Admin-Token` to change featured repositories |
+
+## Known limitations
+
+- Activity is limited to what GitHub's public events API keeps: about 90 days and 300
+  events. It isn't the contribution calendar.
+- Only the 100 most recently updated repositories are read.
+- Without `ADMIN_TOKEN`, anyone can change which repositories a profile features.
+- Stars and languages come from GitHub as-is. There is no history over time.
 
 ## License
 
-MIT © [Moeijiro](https://github.com/Moeijiro)
+MIT © Moeijiro
