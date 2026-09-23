@@ -1,7 +1,7 @@
 import datetime
 from typing import Tuple, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import delete, func, select
 from app.core.config import settings
 from app.db.models import CachedProfile, CachedRepo, CachedActivity, FeaturedRepo
 from app.github.client import github_client
@@ -18,7 +18,10 @@ async def get_or_sync_user_data(
     ttl_delta = datetime.timedelta(seconds=settings.CACHE_TTL_SECONDS)
 
     # 1. Check cached profile
-    stmt_p = select(CachedProfile).where(CachedProfile.username == username)
+    # GitHub logins are case-insensitive. Keying the cache on the raw input made "Octocat" and
+    # "octocat" two cache entries that re-inserted the same repo ids (a primary key) -> 500.
+    key = username.lower()
+    stmt_p = select(CachedProfile).where(func.lower(CachedProfile.username) == key)
     res_p = await db.execute(stmt_p)
     cached_p = res_p.scalar_one_or_none()
 
@@ -29,11 +32,11 @@ async def get_or_sync_user_data(
 
     if not is_stale and cached_p:
         # Load repos from cache
-        stmt_r = select(CachedRepo).where(CachedRepo.username == username).order_by(CachedRepo.stars_count.desc())
+        stmt_r = select(CachedRepo).where(func.lower(CachedRepo.username) == key).order_by(CachedRepo.stars_count.desc())
         res_r = await db.execute(stmt_r)
         db_repos = res_r.scalars().all()
 
-        stmt_e = select(CachedActivity).where(CachedActivity.username == username).order_by(CachedActivity.created_at.desc())
+        stmt_e = select(CachedActivity).where(func.lower(CachedActivity.username) == key).order_by(CachedActivity.created_at.desc())
         res_e = await db.execute(stmt_e)
         db_events = res_e.scalars().all()
 
@@ -116,13 +119,15 @@ async def get_or_sync_user_data(
         db.add(new_p)
 
     # Clean previous repos & activities
-    await db.execute(delete(CachedRepo).where(CachedRepo.username == username))
-    await db.execute(delete(CachedActivity).where(CachedActivity.username == username))
+    canonical = user_fresh.username
+    await db.execute(delete(CachedRepo).where(func.lower(CachedRepo.username) == key))
+    await db.execute(delete(CachedRepo).where(CachedRepo.id.in_([r.id for r in repos_fresh])))
+    await db.execute(delete(CachedActivity).where(func.lower(CachedActivity.username) == key))
 
     for r in repos_fresh:
         db.add(CachedRepo(
             id=r.id,
-            username=username,
+            username=canonical,
             name=r.name,
             full_name=r.full_name,
             description=r.description,
@@ -139,7 +144,7 @@ async def get_or_sync_user_data(
 
     for ev in events_fresh:
         db.add(CachedActivity(
-            username=username,
+            username=canonical,
             event_id=ev.id,
             event_type=ev.type,
             repo_name=ev.repo_name,
@@ -151,12 +156,12 @@ async def get_or_sync_user_data(
     return user_fresh, repos_fresh, events_fresh
 
 async def get_featured_repo_names(username: str, db: AsyncSession) -> List[str]:
-    stmt = select(FeaturedRepo).where(FeaturedRepo.username == username).order_by(FeaturedRepo.display_order.asc())
+    stmt = select(FeaturedRepo).where(FeaturedRepo.username == username.lower()).order_by(FeaturedRepo.display_order.asc())
     res = await db.execute(stmt)
     return [f.repo_name for f in res.scalars().all()]
 
 async def set_featured_repo_names(username: str, repo_names: List[str], db: AsyncSession):
-    await db.execute(delete(FeaturedRepo).where(FeaturedRepo.username == username))
+    await db.execute(delete(FeaturedRepo).where(FeaturedRepo.username == username.lower()))
     for order, name in enumerate(repo_names[:6]):
-        db.add(FeaturedRepo(username=username, repo_name=name, display_order=order))
+        db.add(FeaturedRepo(username=username.lower(), repo_name=name, display_order=order))
     await db.commit()
