@@ -1,6 +1,7 @@
 import datetime
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Index
-from app.db.session import Base
+from app.db.base import Base
+
 
 class CachedProfile(Base):
     __tablename__ = "cached_profiles"
@@ -17,6 +18,7 @@ class CachedProfile(Base):
     following = Column(Integer, default=0)
     github_created_at = Column(DateTime, nullable=True)
     cached_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 
 class CachedRepo(Base):
     __tablename__ = "cached_repos"
@@ -40,6 +42,7 @@ class CachedRepo(Base):
         Index("ix_cached_repos_user_name", "username", "name", unique=True),
     )
 
+
 class CachedActivity(Base):
     __tablename__ = "cached_activities"
 
@@ -50,16 +53,3 @@ class CachedActivity(Base):
     repo_name = Column(String(255), nullable=False)
     payload_summary = Column(String(512), nullable=False)
     created_at = Column(DateTime, nullable=False, index=True)
-
-class FeaturedRepo(Base):
-    __tablename__ = "featured_repos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(128), index=True, nullable=False)
-    repo_name = Column(String(255), nullable=False)
-    display_order = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-    __table_args__ = (
-        Index("ix_featured_user_repo", "username", "repo_name", unique=True),
-    )

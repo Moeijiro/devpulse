@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from app.core.config import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
-from app.api.v1.username import Username
+from app.api.deps import Username
 from app.db.session import get_db
 from app.services.sync import get_or_sync_user_data, get_featured_repo_names, set_featured_repo_names
 from app.services.analytics import aggregate_language_stats, calculate_overview_metrics

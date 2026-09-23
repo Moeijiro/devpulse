@@ -3,7 +3,7 @@ from typing import Tuple, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, func, select
 from app.core.config import settings
-from app.db.models import CachedProfile, CachedRepo, CachedActivity, FeaturedRepo
+from app.models import CachedProfile, CachedRepo, CachedActivity, FeaturedRepo
 from app.github.client import github_client
 from app.github.schemas import (
     GitHubUserNormalized, GitHubRepoNormalized, GitHubEventNormalized
