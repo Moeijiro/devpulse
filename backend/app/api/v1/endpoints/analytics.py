@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
+from app.api.v1.username import Username
 from app.db.session import get_db
 from app.services.sync import get_or_sync_user_data
 from app.services.analytics import (
@@ -11,7 +12,7 @@ from app.github.schemas import LanguageStat, ActivityDayBucket
 router = APIRouter()
 
 @router.get("/{username}/overview")
-async def get_analytics_overview(username: str, db: AsyncSession = Depends(get_db)):
+async def get_analytics_overview(username: Username, db: AsyncSession = Depends(get_db)):
     user, repos, events = await get_or_sync_user_data(username, db)
     overview = calculate_overview_metrics(repos, events)
     overview["user"] = user.model_dump()
@@ -19,7 +20,7 @@ async def get_analytics_overview(username: str, db: AsyncSession = Depends(get_d
 
 @router.get("/{username}/activity", response_model=List[ActivityDayBucket])
 async def get_activity_timeline(
-    username: str,
+    username: Username,
     days: int = Query(30, description="Window in days: 7, 30, or 90"),
     db: AsyncSession = Depends(get_db)
 ):
@@ -30,6 +31,6 @@ async def get_activity_timeline(
     return aggregate_activity_timeline(events, days=days)
 
 @router.get("/{username}/languages", response_model=List[LanguageStat])
-async def get_language_breakdown(username: str, db: AsyncSession = Depends(get_db)):
+async def get_language_breakdown(username: Username, db: AsyncSession = Depends(get_db)):
     _, repos, _ = await get_or_sync_user_data(username, db)
     return aggregate_language_stats(repos)
