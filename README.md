@@ -1,5 +1,7 @@
 # DevPulse
 
+**Portfolio case study:** [moeijiro.github.io/portfolio/projects/devpulse](https://moeijiro.github.io/portfolio/projects/devpulse/) · **Live demo:** not hosted — the app runs locally in a few commands (see below).
+
 **See what a developer actually ships.** DevPulse turns any public GitHub profile into
 an activity chart, a language breakdown and a searchable repository list. It also gives
 each developer a clean profile page they can share with clients and employers. GitHub
